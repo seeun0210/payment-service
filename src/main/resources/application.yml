@@ -25,6 +25,19 @@ spring:
             connectTimeout: 5000
             readTimeout: 5000
 
+    circuitbreaker:
+      resilience4j:
+        instances:
+          nicepay:
+            slidingWindowSize: 10
+            minimumNumberOfCalls: 5
+            permittedNumberOfCallsInHalfOpenState: 3
+            automaticTransitionFromOpenToHalfOpenEnabled: true
+            waitDurationInOpenState: 10s
+            failureRateThreshold: 50
+            timeLimiter:
+              timeoutDuration: 5s
+
 server:
   port: 8082
 

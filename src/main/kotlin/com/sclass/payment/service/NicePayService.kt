@@ -3,20 +3,39 @@ package com.sclass.payment.service
 import com.sclass.payment.config.NicePayConfig
 import com.sclass.payment.entity.Payment
 import org.slf4j.LoggerFactory
+import org.springframework.cloud.client.circuitbreaker.CircuitBreaker
+import org.springframework.cloud.client.circuitbreaker.CircuitBreakerFactory
 import org.springframework.core.ParameterizedTypeReference
 import org.springframework.http.MediaType
 import org.springframework.stereotype.Service
 import org.springframework.web.reactive.function.client.WebClient
+import reactor.util.retry.Retry
 import java.nio.charset.StandardCharsets
-import java.util.*
+import java.time.Duration
+import java.util.function.Supplier
 
 @Service
 class NicePayService(
     private val nicePayConfig: NicePayConfig,
-    private val webClient: WebClient
+    private val webClient: WebClient,
+    private val circuitBreakerFactory: CircuitBreakerFactory<*, *>
 ) {
-
     private val log = LoggerFactory.getLogger(javaClass)
+
+    private val circuitBreaker: CircuitBreaker = circuitBreakerFactory.create("nicepay")
+
+    private val retrySpec = Retry.backoff(3, Duration.ofSeconds(1))
+        .maxBackoff(Duration.ofSeconds(10))
+        .multiplier(2.0)
+        .filter { it is RuntimeException }
+        .doBeforeRetry { retrySignal ->
+            log.warn(
+                "나이스페이 API 재시도 - 시도 횟수: {}, 오류: {}",
+                retrySignal.totalRetries() + 1,
+                retrySignal.failure().message
+            )
+        }
+
 
     fun approvePayment(payment: Payment, tid: String, authToken: String, amount: String) {
         log.info(
@@ -32,8 +51,9 @@ class NicePayService(
 
         logRequestDetails(apiUrl, requestData)
 
-        try {
-            val response = webClient.post()
+        // ✅ Circuit Breaker + Reactor Retry 조합 (타입 명시)
+        val result: Map<String, Any>? = circuitBreaker.run(Supplier {
+            webClient.post()
                 .uri(apiUrl)
                 .headers { headers ->
                     headers.contentType = MediaType.APPLICATION_JSON
@@ -47,15 +67,22 @@ class NicePayService(
                 }
                 .bodyValue(requestData)
                 .retrieve()
-                .bodyToMono(object : ParameterizedTypeReference<Map<String, Any>>() {})
-                .block()
+                .bodyToMono<Map<String, Any>>(
+                    object : ParameterizedTypeReference<Map<String, Any>>() {}
+                )
+                .retryWhen(retrySpec) // ✅ Reactor Retry 적용
+                .doOnError { error ->
+                    log.error("나이스페이 승인 API 호출 최종 실패", error)
+                }
+                .block() // 동기 호출을 위해 block() 사용
+        })
 
-            validateResponse(response)
-            log.info("나이스페이 승인 성공")
-        } catch (e: Exception) {
-            log.error("나이스페이 승인 API 호출 오류: {}", e.message)
-            throw e
+        if (result == null) {
+            throw RuntimeException("NicePay 서비스가 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도해주세요.")
         }
+
+        validateResponse(result)
+        log.info("나이스페이 승인 성공")
     }
 
     fun createPaymentInfo(
