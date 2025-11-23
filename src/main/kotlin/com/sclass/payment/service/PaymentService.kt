@@ -86,11 +86,15 @@ class PaymentService(
 
         try {
             nicePayService.approvePayment(payment, tid, authToken, amount)
+
+            // ✅ 엔티티의 도메인 메서드 사용
             payment.approve(tid, authToken, "0000")
             paymentRepository.save(payment)
             orderServiceClient.updateOrderStatus(payment.orderId, "SUCCEED")
+
         } catch (e: Exception) {
-            payment.fail("결제 승인 중 오류: ${e.message}")
+            // ✅ fail() 메서드에 tid 전달
+            payment.fail(tid, "결제 승인 중 오류: ${e.message}")
             paymentRepository.save(payment)
             orderServiceClient.updateOrderStatus(payment.orderId, "FAILED")
             throw e

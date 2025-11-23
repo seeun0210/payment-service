@@ -15,65 +15,52 @@ class Payment(
     var id: Long = 0,
 
     // 🎯 외부 서비스 참조 (마이크로서비스 분리)
-    // Order 서비스의 Order ID를 참조 (직접 관계 없음)
     @Column(nullable = false, length = 100)
-    var orderId: String = "",  // 외부 Order 서비스의 ID (UUID 또는 String)
+    var orderId: String = "",
 
-    // 결제를 요청한 사용자 정보 (외부 User 서비스 참조)
     @Column(nullable = false)
     var userId: String = "",
 
-    // 결제할 상품 정보 (외부 Product 서비스 참조)
     @Column(nullable = false)
     var productId: Long = 0,
 
-    // 결제 금액 (Payment 서비스가 관리하는 정보)
     @Column(nullable = false)
     var totalAmount: Int = 0,
 
-    // 🎯 결제 상태 (Payment 서비스가 관리)
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     var status: PaymentStatus = PaymentStatus.PENDING,
 
-    // 🎯 PG사 정보 (Payment 서비스가 관리)
     @Column(nullable = false, length = 20)
-    var pgType: String = "",  // NICEPAY, TOSS, KAKAO_PAY
+    var pgType: String = "",
 
-    // 🎯 PG사 주문 ID (Payment 서비스가 생성/관리)
     @Column(nullable = false, length = 100, unique = true)
-    var pgOrderId: String = "",  // PG사에 전달할 주문 ID
+    var pgOrderId: String = "",
 
-    // 🎯 PG사 거래 ID (Transaction ID) - PG사에서 반환
     @Column(length = 100)
-    var pgTid: String? = null,  // PG사에서 반환하는 거래 ID
+    var pgTid: String? = null,
 
-    // 결제 수단
     @Column(length = 50)
-    var paymentMethod: String? = null,  // CARD, BANK_TRANSFER 등
+    var paymentMethod: String? = null,
 
-    // 🎯 결제 승인 정보
     @Column(length = 500)
-    var authToken: String? = null,  // PG사 인증 토큰
+    var authToken: String? = null,
 
     @Column(length = 100)
-    var authResultCode: String? = null,  // PG사 인증 결과 코드
+    var authResultCode: String? = null,
 
-    // 추가 정보
     @Column(length = 500)
     var memo: String? = null,
 
     @Column(length = 1000)
-    var metadata: String? = null,  // JSON 형태의 추가 메타데이터
-
-    // 🎯 결제 완료/실패 시간
-    @Column
-    var approvedAt: LocalDateTime? = null,  // 결제 승인 시간
+    var metadata: String? = null,
 
     @Column
-    var failedAt: LocalDateTime? = null,  // 결제 실패 시간
+    var approvedAt: LocalDateTime? = null,
 
-    // BaseEntity 필드들
+    @Column
+    var failedAt: LocalDateTime? = null,
+
     @CreatedDate
     @Column(nullable = false, updatable = false)
     var createdAt: LocalDateTime = LocalDateTime.now(),
@@ -86,6 +73,12 @@ class Payment(
         PENDING, SUCCEED, CANCELLED, FAILED, REFUNDED, PARTIAL_REFUNDED
     }
 
+    /**
+     * 결제 승인 처리
+     * @param tid PG사 거래 ID
+     * @param authToken PG사 인증 토큰
+     * @param authResultCode PG사 인증 결과 코드
+     */
     fun approve(tid: String, authToken: String, authResultCode: String) {
         require(status == PaymentStatus.PENDING) {
             "대기 중인 결제만 승인할 수 있습니다. 현재 상태: $status"
@@ -101,18 +94,33 @@ class Payment(
         this.approvedAt = LocalDateTime.now()
     }
 
-    fun fail(reason: String? = null) {
+    /**
+     * 결제 실패 처리
+     * @param tid PG사 거래 ID (선택적, 실패 시에도 tid가 있을 수 있음)
+     * @param reason 실패 사유
+     */
+    fun fail(tid: String? = null, reason: String? = null) {  // ✅ tid 파라미터 추가
         require(status == PaymentStatus.PENDING) {
             "대기 중인 결제만 실패 처리할 수 있습니다. 현재 상태: $status"
         }
 
         this.status = PaymentStatus.FAILED
         this.failedAt = LocalDateTime.now()
+
+        // ✅ tid가 제공되면 설정
+        if (tid != null) {
+            this.pgTid = tid
+        }
+
         if (reason != null) {
             this.memo = reason
         }
     }
 
+    /**
+     * 결제 취소 처리
+     * @param reason 취소 사유
+     */
     fun cancel(reason: String? = null) {
         require(status == PaymentStatus.PENDING) {
             "대기 중인 결제만 취소할 수 있습니다. 현재 상태: $status"
@@ -124,9 +132,11 @@ class Payment(
         }
     }
 
-    // ✅ 좋음: 상태 확인 헬퍼 메서드
+    // ✅ 상태 확인 헬퍼 메서드
     fun isPending(): Boolean = status == PaymentStatus.PENDING
     fun isApproved(): Boolean = status == PaymentStatus.SUCCEED
+    fun isFailed(): Boolean = status == PaymentStatus.FAILED
+    fun isCancelled(): Boolean = status == PaymentStatus.CANCELLED
     fun canBeCancelled(): Boolean = status == PaymentStatus.PENDING
     fun canBeRefunded(): Boolean = status == PaymentStatus.SUCCEED
 

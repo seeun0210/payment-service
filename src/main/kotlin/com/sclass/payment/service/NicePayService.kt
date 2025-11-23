@@ -74,10 +74,9 @@ class NicePayService(
             "customerName" to userNickname,
             "returnUrl" to (returnUrl ?: nicePayConfig.returnUrl),
             "cancelUrl" to nicePayConfig.cancelUrl,
-            "clientId" to nicePayConfig.clientId,  // ✅ clientId만 전달
+            "clientId" to nicePayConfig.clientId,
             "baseUrl" to nicePayConfig.baseUrl,
             "timestamp" to System.currentTimeMillis()
-            // ❌ secretKey 제거됨
         )
     }
     private fun getTransactionId(tid: String?, orderId: String): String {
